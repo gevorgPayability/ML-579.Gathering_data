@@ -18,8 +18,8 @@ def get_postgress_data(sql, user, password, col_index=None):
     return(data)
 
 
-def get_info_from_notifications(data, notification_colum, columns, date_column,
-                                period=90, return_errors=False):
+def get_info_from_notifications(row, notification_colum, columns_dictionary,
+                                date_column, period=90, return_errors=False):
     """Short summary.
     Function return new dataframe with information about notifications type
     seller received in selected period of time
@@ -40,47 +40,34 @@ def get_info_from_notifications(data, notification_colum, columns, date_column,
         pandas dataframe.
 
     """
-    error_list = []
-    df = data.copy()
-    df[date_column] = pd.to_datetime(df[date_column])
 
-    columns_dict = {column: column.replace('_', ' ') for column in columns}
-
-    for col in columns:
-        df[col] = 0
-
-    df['other'] = 0
-
-    for index in df.index:
-        try:
-            row = df.loc[index, notification_colum]
-            date_filter = df.loc[index, date_column] - timedelta(days=period)
-            if isinstance(row, Iterable):
-                for notification in row:
-                    if notification is not None:
-                        splited = notification.split(':', 1)
-                        date = datetime.strptime(splited[0], '%B %d, %Y')
-                        message = splited[1].lower()
-                        if date < date_filter:
-                            break
-                        other_message = []
-                        for column_name, value in columns_dict.items():
-                            if value in message:
-                                df.loc[index, column_name] += 1
-                                other_message.append(1)
-                            else:
-                                other_message.append(0)
-                        if np.max(other_message) == 0:
-                            df.loc[index, 'other'] += 1
-        except Exception as e:
-            message = 'Something unexpected happened at index' + index + '. Error message: ' + e
-            error_list.append(message)
-            print(message)
-
-    if return_errors:
-        return df, error_list
-
-    return(df)
+    try:
+        notifications = row[notification_colum]
+        date_filter = row[date_column] - timedelta(days=period)
+        return_dictionary = {key: 0 for key in columns_dictionary.keys()}
+        return_dictionary['other'] = 0
+        if isinstance(notifications, Iterable):
+            for notification in notifications:
+                if notification is not None:
+                    splited = notification.split(':', 1)
+                    date = datetime.strptime(splited[0], '%B %d, %Y')
+                    message = splited[1].lower()
+                    if date < datetime(date_filter.year, date_filter.month, date_filter.day):
+                        break
+                    other_message = []
+                    for column_name, value in columns_dictionary.items():
+                        if value in message:
+                            return_dictionary[column_name] += 1
+                            other_message.append(1)
+                        else:
+                            other_message.append(0)
+                    if np.max(other_message) == 0:
+                        return_dictionary['other'] += 1
+        return(pd.Series(return_dictionary))
+    except Exception as e:
+        message = e
+        # error_list.append(message)
+        return np.NaN
 
 
 def has_active_loan(row, loan_column, date_column):
@@ -243,8 +230,8 @@ def interpolate_missing_values(data, cls_to_interpolate, by_column='mp_sup_key',
     return df
 
 
-def fill_missing_values_from_notification(data, columns_from_notifications,
-                                          limit=30, by_column='mp_sup_key'):
+def fill_missing_values(data, columns,
+                        limit=30, by_column='mp_sup_key'):
     """ Function fill missing values in columns from notifications. It fill forwards
     and backwards by given (limit) day
 
@@ -263,9 +250,30 @@ def fill_missing_values_from_notification(data, columns_from_notifications,
     suppliers = df[by_column].unique()
     print('Number of suppliers is', len(suppliers))
 
-    df[columns_from_notifications] = df.groupby(by_column)[columns_from_notifications].transform(
+    df[columns] = df.groupby(by_column)[columns].transform(
         lambda x: x.fillna(method='ffill', limit=limit))
-    df[columns_from_notifications] = df.groupby(by_column)[columns_from_notifications].transform(
+    df[columns] = df.groupby(by_column)[columns].transform(
         lambda x: x.fillna(method='bfill', limit=limit))
 
     return df
+
+
+def create_notification_columns(data, columns_from_notifications):
+    """Creates empty columns from notifications for another functions
+
+    Arguments:
+        data {[pandas dataframe]} -- [pandas dataframe with notification json column
+        columns_from_notifications {[type]} -- [description]
+    """
+
+    df = data.copy()
+    for column in columns_from_notifications:
+        df[column] = 0
+
+    df['other'] = 0
+
+    return df
+
+
+def create_dict_with_notification(columns):
+    return {column: column.replace('_', ' ') for column in columns}
